@@ -77,6 +77,7 @@ class SparseTemporalMemory(nn.Module):
     else:
       # create new indexes
       try:
+        raise Exception("I want FLANN!")
         from .faiss_index import FAISSIndex
         hidden['indexes'] = \
             [FAISSIndex(cell_size=self.cell_size,
@@ -89,6 +90,7 @@ class SparseTemporalMemory(nn.Module):
             [FLANNIndex(cell_size=self.cell_size,
                         nr_cells=self.mem_size, K=self.K, num_kdtrees=self.num_lists,
                         probes=self.index_checks, gpu_id=self.mem_gpu_id) for x in range(b)]
+        # raise e
 
     # add existing memory into indexes
     pos = hidden['read_positions'].squeeze().data.cpu().numpy()
