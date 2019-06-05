@@ -161,7 +161,7 @@ class SparseTemporalMemory(nn.Module):
 
     (b, m, w) = hidden['memory'].size()
     # update memory
-    hidden['memory'].scatter_(1, positions.unsqueeze(2).expand(b, self.c, w), visible_memory)
+    hidden['memory'] = hidden['memory'].scatter(1, positions.unsqueeze(2).expand(b, self.c, w), visible_memory)
 
     # non-differentiable operations
     pos = positions.data.cpu().numpy()
@@ -184,7 +184,7 @@ class SparseTemporalMemory(nn.Module):
 
     # since only KL*2 entries are kept non-zero sparse, create the dense version from the sparse one
     precedence_dense = cuda(T.zeros(b, m), gpu_id=self.gpu_id)
-    precedence_dense.scatter_(1, temporal_read_positions, precedence)
+    precedence_dense = precedence_dense.scatter(1, temporal_read_positions, precedence)
     precedence_dense_i = precedence_dense.unsqueeze(2)
 
     temporal_write_weights_j = write_weights.gather(1, temporal_read_positions).unsqueeze(1)
@@ -220,7 +220,7 @@ class SparseTemporalMemory(nn.Module):
     write_weights = write_gate * (x + y)
 
     # store the write weights
-    hidden['write_weights'].scatter_(1, hidden['read_positions'], write_weights)
+    hidden['write_weights'] = hidden['write_weights'].scatter(1, hidden['read_positions'], write_weights)
 
     # erase matrix
     erase_matrix = I.unsqueeze(2).expand(hidden['visible_memory'].size())
@@ -269,7 +269,7 @@ class SparseTemporalMemory(nn.Module):
     # usage after write
     relevant_usages = (self.timestep - relevant_usages) * u + relevant_usages * (1 - u)
 
-    usage.scatter_(1, read_positions, relevant_usages)
+    usage = usage.scatter(1, read_positions, relevant_usages)
 
     return usage, I
 
@@ -335,7 +335,7 @@ class SparseTemporalMemory(nn.Module):
         )
 
     hidden['read_positions'] = positions
-    hidden['read_weights'] = hidden['read_weights'].scatter_(1, positions, read_weights)
+    hidden['read_weights'] = hidden['read_weights'].scatter(1, positions, read_weights)
     hidden['read_vectors'] = read_vectors
     hidden['visible_memory'] = visible_memory
 

@@ -13,7 +13,8 @@ import time
 import argparse
 from visdom import Visdom
 
-sys.path.insert(0, os.path.join('..', '..'))
+# sys.path.insert(0, os.path.join('..', '..'))
+sys.path.insert(0, os.getcwd())
 
 import torch as T
 from torch.autograd import Variable as var
@@ -100,7 +101,7 @@ def criterion(predictions, targets):
       -1 * F.logsigmoid(predictions) * (targets) - T.log(1 - F.sigmoid(predictions) + 1e-9) * (1 - targets)
   )
 
-if __name__ == '__main__':
+if __name__ == '__main__' or True:
 
   dirname = os.path.dirname(__file__)
   ckpts_dir = os.path.join(dirname, 'checkpoints')
@@ -214,7 +215,7 @@ if __name__ == '__main__':
 
     T.nn.utils.clip_grad_norm_(rnn.parameters(), args.clip)
     optimizer.step()
-    loss_value = loss.data[0]
+    loss_value = loss.item()
 
     summarize = (epoch % summarize_freq == 0)
     take_checkpoint = (epoch != 0) and (epoch % check_freq == 0)
@@ -363,19 +364,19 @@ if __name__ == '__main__':
     llprint("\nIteration %d/%d" % (i, iterations))
     # We test now the learned generalization using sequence_max_length examples
     random_length = np.random.randint(2, sequence_max_length * 10 + 1)
-    input_data, target_output, loss_weights = generate_data(random_length, input_size)
+    input_data, target_output = generate_data(batch_size, random_length, args.input_size, args.cuda)
 
     if rnn.debug:
       output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
     else:
       output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
 
-    output = output[:, -1, :].sum().data.cpu().numpy()[0]
-    target_output = target_output.sum().data.cpu().numpy()
+    output = output[:, -1, :].sum().item()
+    target_output = target_output.sum().item()
 
-    try:
-      print("\nReal value: ", ' = ' + str(int(target_output[0])))
-      print("Predicted:  ", ' = ' + str(int(output // 1)) + " [" + str(output) + "]")
-    except Exception as e:
-      pass
+    # try:
+    print("\nReal value: ", ' = ' + str(int(target_output)))
+    print("Predicted:  ", ' = ' + str(int(output // 1)) + " [" + str(output) + "]")
+    # except Exception as e:
+    #   pass
 
