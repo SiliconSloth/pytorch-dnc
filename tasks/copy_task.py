@@ -212,6 +212,8 @@ if __name__ == '__main__' or True:
     loss = criterion((output), target_output)
 
     loss.backward()
+    print(target_output[0])
+    print(output[0])
 
     T.nn.utils.clip_grad_norm_(rnn.parameters(), args.clip)
     optimizer.step()
