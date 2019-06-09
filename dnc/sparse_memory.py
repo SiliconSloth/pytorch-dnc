@@ -161,7 +161,7 @@ class SparseMemory(nn.Module):
 
     (b, m, w) = hidden['memory'].size()
     # update memory
-    hidden['memory'].scatter_(1, positions.unsqueeze(2).expand(b, self.c, w), visible_memory)
+    hidden['memory'] = hidden['memory'].scatter(1, positions.unsqueeze(2).expand(b, self.c, w), visible_memory)
 
     # non-differentiable operations
     pos = positions.data.cpu().numpy()
@@ -196,7 +196,7 @@ class SparseMemory(nn.Module):
     write_weights = write_gate * (x + y)
 
     # store the write weights
-    hidden['write_weights'].scatter_(1, hidden['read_positions'], write_weights)
+    hidden['write_weights'] = hidden['write_weights'].scatter(1, hidden['read_positions'], write_weights)
 
     # erase matrix
     erase_matrix = I.unsqueeze(2).expand(hidden['visible_memory'].size())
@@ -227,7 +227,7 @@ class SparseMemory(nn.Module):
     # usage after write
     relevant_usages = (self.timestep - relevant_usages) * u + relevant_usages * (1 - u)
 
-    usage.scatter_(1, read_positions, relevant_usages)
+    usage = usage.scatter(1, read_positions, relevant_usages)
 
     return usage, I
 
@@ -277,7 +277,7 @@ class SparseMemory(nn.Module):
         )
 
     hidden['read_positions'] = positions
-    hidden['read_weights'] = hidden['read_weights'].scatter_(1, positions, read_weights)
+    hidden['read_weights'] = hidden['read_weights'].scatter(1, positions, read_weights)
     hidden['read_vectors'] = read_vectors
     hidden['visible_memory'] = visible_memory
 
