@@ -62,20 +62,20 @@ viz = Visdom()
 # assert viz.check_connection()
 
 if args.cuda != -1:
-  print('Using CUDA.')
-  T.manual_seed(1111)
+    print('Using CUDA.')
+    T.manual_seed(1111)
 else:
-  print('Using CPU.')
+    print('Using CPU.')
 
 def llprint(message):
-  sys.stdout.write(message)
-  sys.stdout.flush()
+    sys.stdout.write(message)
+    sys.stdout.flush()
 
 
 def onehot(x, n):
-  ret = np.zeros(n).astype(np.float32)
-  ret[x] = 1.0
-  return ret
+    ret = np.zeros(n).astype(np.float32)
+    ret[x] = 1.0
+    return ret
 
 
 BATCH_SIZE = 64
@@ -89,188 +89,208 @@ def embedded_to_string(embedded):
     return "".join(chars)
 
 
-def embed(string):
-    embedded = np.zeros([len(string), len(CHARS)], dtype=np.float32)
-    for i, char in enumerate(string):
-        embedded[i, CHAR_IDS[char]] = 1
+def embed(strings):
+    padded_length = max(map(len, strings))
+    embedded = np.zeros([len(strings), padded_length, len(CHARS)], dtype=np.float32)
+    for i, string in enumerate(strings):
+        for j, char in enumerate(string):
+            embedded[i, j, CHAR_IDS[char]] = 1
     return embedded
 
 
-def embed_question(num, length):
-    question = "%d=_____" % num
-    question = question.rjust(length, "0")
-    answer = str(num+1).rjust(length, "0")
-    return embed(question), embed(answer)
+def embed_questions(nums, length):
+    questions = []
+    answers = []
+    for n in nums:
+        question = "%d=_____" % n
+        question = question.rjust(length, "0")
+        answer = str(n+1).rjust(length, "0")
+        questions.append(question)
+        answers.append(answer)
+    return embed(questions), embed(answers)
 
 
 def generate_data(length):
-    digits = np.random.randint(0, 10, length)
-    digits[:random.randint(0, length-1)] = 9
-    if np.all(digits == 9):
-        digits[-1] = 8
-    num = np.sum(digits * 10 ** np.arange(digits.shape[0]))
-    questions, answers = embed_question(num, length)
-    return cudavec(questions, gpu_id=args.cuda).unsqueeze(0), cudavec(answers, gpu_id=args.cuda).unsqueeze(0)
+    digits = np.random.randint(0, 10, [BATCH_SIZE, length])
+    for i in range(BATCH_SIZE):
+        digits[i, :random.randint(0,4)] = 9
+        if np.all(digits[i] == 9):
+            digits[i, -1] = 8
+    nums = np.sum(digits * 10**np.arange(digits.shape[1]), axis=1)
+    questions, answers = embed_questions(nums, length)
+    return cudavec(questions, gpu_id=args.cuda), cudavec(answers, gpu_id=args.cuda)
 
 
 def cross_entropy(prediction, target):
-  return (prediction - target) ** 2
+    return (prediction - target) ** 2
 
 
 if __name__ == '__main__':
 
-  dirname = os.path.dirname(__file__)
-  ckpts_dir = os.path.join(dirname, 'checkpoints')
+    dirname = os.path.dirname(__file__)
+    ckpts_dir = os.path.join(dirname, 'checkpoints')
 
-  input_size = args.input_size
-  memory_type = args.memory_type
-  lr = args.lr
-  clip = args.clip
-  batch_size = args.batch_size
-  sequence_max_length = args.sequence_max_length
-  cuda = args.cuda
-  iterations = args.iterations
-  summarize_freq = args.summarize_freq
-  check_freq = args.check_freq
-  visdom = args.visdom
+    input_size = args.input_size
+    memory_type = args.memory_type
+    lr = args.lr
+    clip = args.clip
+    batch_size = args.batch_size
+    sequence_max_length = args.sequence_max_length
+    cuda = args.cuda
+    iterations = args.iterations
+    summarize_freq = args.summarize_freq
+    check_freq = args.check_freq
+    visdom = args.visdom
 
-  from_checkpoint = None
+    from_checkpoint = None
 
-  if args.memory_type == 'dnc':
-    rnn = DNC(
-        input_size=args.input_size,
-        hidden_size=args.nhid,
-        rnn_type=args.rnn_type,
-        num_layers=args.nlayer,
-        num_hidden_layers=args.nhlayer,
-        dropout=args.dropout,
-        nr_cells=args.mem_slot,
-        cell_size=args.mem_size,
-        read_heads=args.read_heads,
-        gpu_id=args.cuda,
-        debug=args.visdom,
-        batch_first=True,
-        independent_linears=True
-    )
-  elif args.memory_type == 'sdnc':
-    rnn = SDNC(
-        input_size=args.input_size,
-        hidden_size=args.nhid,
-        rnn_type=args.rnn_type,
-        num_layers=args.nlayer,
-        num_hidden_layers=args.nhlayer,
-        dropout=args.dropout,
-        nr_cells=args.mem_slot,
-        cell_size=args.mem_size,
-        sparse_reads=args.sparse_reads,
-        temporal_reads=args.temporal_reads,
-        read_heads=args.read_heads,
-        gpu_id=args.cuda,
-        debug=args.visdom,
-        batch_first=True,
-        independent_linears=False
-    )
-  elif args.memory_type == 'sam':
-    rnn = SAM(
-        input_size=args.input_size,
-        hidden_size=args.nhid,
-        rnn_type=args.rnn_type,
-        num_layers=args.nlayer,
-        num_hidden_layers=args.nhlayer,
-        dropout=args.dropout,
-        nr_cells=args.mem_slot,
-        cell_size=args.mem_size,
-        sparse_reads=args.sparse_reads,
-        read_heads=args.read_heads,
-        gpu_id=args.cuda,
-        debug=args.visdom,
-        batch_first=True,
-        independent_linears=False
-    )
-  else:
-    raise Exception('Not recognized type of memory')
-
-  if args.cuda != -1:
-    rnn = rnn.cuda(args.cuda)
-
-  print(rnn)
-
-  last_save_losses = []
-
-  if args.optim == 'adam':
-    optimizer = optim.Adam(rnn.parameters(), lr=args.lr, eps=1e-9, betas=[0.9, 0.98])  # 0.0001
-  elif args.optim == 'adamax':
-    optimizer = optim.Adamax(rnn.parameters(), lr=args.lr, eps=1e-9, betas=[0.9, 0.98])  # 0.0001
-  elif args.optim == 'rmsprop':
-    optimizer = optim.RMSprop(rnn.parameters(), lr=args.lr, momentum=0.9, eps=1e-10)  # 0.0001
-  elif args.optim == 'sgd':
-    optimizer = optim.SGD(rnn.parameters(), lr=args.lr)  # 0.01
-  elif args.optim == 'adagrad':
-    optimizer = optim.Adagrad(rnn.parameters(), lr=args.lr)
-  elif args.optim == 'adadelta':
-    optimizer = optim.Adadelta(rnn.parameters(), lr=args.lr)
-
-  last_100_losses = []
-
-  (chx, mhx, rv) = (None, None, None)
-  for epoch in range(iterations + 1):
-    llprint("\rIteration {ep}/{tot}".format(ep=epoch, tot=iterations))
-    optimizer.zero_grad()
-    # We use for training just (sequence_max_length / 10) examples
-    random_length = np.random.randint(2, (sequence_max_length) + 1)
-    input_data, target_output = generate_data(5)
-
-    if rnn.debug:
-      output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+    if args.memory_type == 'dnc':
+        rnn = DNC(
+            input_size=args.input_size,
+            hidden_size=args.nhid,
+            rnn_type=args.rnn_type,
+            num_layers=args.nlayer,
+            num_hidden_layers=args.nhlayer,
+            dropout=args.dropout,
+            nr_cells=args.mem_slot,
+            cell_size=args.mem_size,
+            read_heads=args.read_heads,
+            gpu_id=args.cuda,
+            debug=args.visdom,
+            batch_first=True,
+            independent_linears=True
+        )
+    elif args.memory_type == 'sdnc':
+        rnn = SDNC(
+            input_size=args.input_size,
+            hidden_size=args.nhid,
+            rnn_type=args.rnn_type,
+            num_layers=args.nlayer,
+            num_hidden_layers=args.nhlayer,
+            dropout=args.dropout,
+            nr_cells=args.mem_slot,
+            cell_size=args.mem_size,
+            sparse_reads=args.sparse_reads,
+            temporal_reads=args.temporal_reads,
+            read_heads=args.read_heads,
+            gpu_id=args.cuda,
+            debug=args.visdom,
+            batch_first=True,
+            independent_linears=False
+        )
+    elif args.memory_type == 'sam':
+        rnn = SAM(
+            input_size=args.input_size,
+            hidden_size=args.nhid,
+            rnn_type=args.rnn_type,
+            num_layers=args.nlayer,
+            num_hidden_layers=args.nhlayer,
+            dropout=args.dropout,
+            nr_cells=args.mem_slot,
+            cell_size=args.mem_size,
+            sparse_reads=args.sparse_reads,
+            read_heads=args.read_heads,
+            gpu_id=args.cuda,
+            debug=args.visdom,
+            batch_first=True,
+            independent_linears=False
+        )
     else:
-      output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+        raise Exception('Not recognized type of memory')
 
-    output = output[:,-5:,:]
-    loss = cross_entropy(output, target_output).sum()
+    if args.cuda != -1:
+        rnn = rnn.cuda(args.cuda)
 
-    loss.backward()
+    print(rnn)
 
-    T.nn.utils.clip_grad_norm_(rnn.parameters(), args.clip)
-    optimizer.step()
-    loss_value = loss.item()
+    last_save_losses = []
 
-    # detach memory from graph
-    mhx = { k : (v.detach() if isinstance(v, var) else v) for k, v in mhx.items() }
+    if args.optim == 'adam':
+        optimizer = optim.Adam(rnn.parameters(), lr=args.lr, eps=1e-9, betas=[0.9, 0.98])  # 0.0001
+    elif args.optim == 'adamax':
+        optimizer = optim.Adamax(rnn.parameters(), lr=args.lr, eps=1e-9, betas=[0.9, 0.98])  # 0.0001
+    elif args.optim == 'rmsprop':
+        optimizer = optim.RMSprop(rnn.parameters(), lr=args.lr, momentum=0.9, eps=1e-10)  # 0.0001
+    elif args.optim == 'sgd':
+        optimizer = optim.SGD(rnn.parameters(), lr=args.lr)  # 0.01
+    elif args.optim == 'adagrad':
+        optimizer = optim.Adagrad(rnn.parameters(), lr=args.lr)
+    elif args.optim == 'adadelta':
+        optimizer = optim.Adadelta(rnn.parameters(), lr=args.lr)
 
-    summarize = (epoch % summarize_freq == 0)
-    take_checkpoint = (epoch != 0) and (epoch % iterations == 0)
+    last_100_losses = []
 
-    last_100_losses.append(loss_value)
+    (chx, mhx, rv) = (None, None, None)
+    for epoch in range(iterations + 1):
+        llprint("\rIteration {ep}/{tot}".format(ep=epoch, tot=iterations))
+        optimizer.zero_grad()
+        # We use for training just (sequence_max_length / 10) examples
+        random_length = np.random.randint(2, (sequence_max_length) + 1)
+        input_data, target_output = generate_data(5)
 
-    if summarize:
-      llprint("\rIteration %d/%d" % (epoch, iterations))
-      llprint("\nAvg. Logistic Loss: %.4f\n" % (np.mean(last_100_losses)))
-      print("Real value: ", ' = ' + embedded_to_string(target_output[0]))
-      print("Predicted:  ", ' = ' + embedded_to_string(output[0]))
-      last_100_losses = []
+        if rnn.debug:
+            output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+        else:
+            output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
 
-    if take_checkpoint:
-      llprint("\nSaving Checkpoint ... "),
-      check_ptr = os.path.join(ckpts_dir, 'step_{}.pth'.format(epoch))
-      cur_weights = rnn.state_dict()
-      T.save(cur_weights, check_ptr)
-      llprint("Done!\n")
+        output = output[:,-5:,:]
+        loss = cross_entropy(output, target_output).sum()
 
-  llprint("\nTesting generalization...\n")
+        loss.backward()
 
-  rnn.eval()
+        T.nn.utils.clip_grad_norm_(rnn.parameters(), args.clip)
+        optimizer.step()
+        loss_value = loss.item()
 
-  for i in range(int((iterations + 1) / 10)):
-    llprint("\nIteration %d/%d" % (i, iterations))
-    # We test now the learned generalization using sequence_max_length examples
-    random_length = np.random.randint(2, int(sequence_max_length) * 10 + 1)
-    input_data, target_output = generate_data(5)
+        # detach memory from graph
+        mhx = { k : (v.detach() if isinstance(v, var) else v) for k, v in mhx.items() }
 
-    if rnn.debug:
-      output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
-    else:
-      output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+        summarize = (epoch % summarize_freq == 0)
+        take_checkpoint = (epoch != 0) and (epoch % iterations == 0)
 
-    output = output[:, -5:, :]
-    print("Real value: ", ' = ' + embedded_to_string(target_output[0]))
-    print("Predicted:  ", ' = ' + embedded_to_string(output[0]))
+        last_100_losses.append(loss_value)
+
+        if summarize:
+            llprint("\rIteration %d/%d" % (epoch, iterations))
+            llprint("\nAvg. Logistic Loss: %.4f\n" % (np.mean(last_100_losses)))
+            num_correct = 0
+            for target, actual in zip(target_output, output):
+                target_str = embedded_to_string(target)
+                actual_str = embedded_to_string(actual)
+                print(target_str + ": " + actual_str)
+                if target_str == actual_str:
+                    num_correct += 1
+            print("Accuracy: %f" % (num_correct / output.shape[0]))
+            last_100_losses = []
+
+        if take_checkpoint:
+            llprint("\nSaving Checkpoint ... "),
+            check_ptr = os.path.join(ckpts_dir, 'step_{}.pth'.format(epoch))
+            cur_weights = rnn.state_dict()
+            T.save(cur_weights, check_ptr)
+            llprint("Done!\n")
+
+    llprint("\nTesting generalization...\n")
+
+    rnn.eval()
+
+    for i in range(int((iterations + 1) / 10)):
+        llprint("\nIteration %d/%d" % (i, iterations))
+        # We test now the learned generalization using sequence_max_length examples
+        random_length = np.random.randint(2, int(sequence_max_length) * 10 + 1)
+        input_data, target_output = generate_data(5)
+
+        if rnn.debug:
+            output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+        else:
+            output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+
+        output = output[:, -5:, :]
+        num_correct = 0
+        for target, actual in zip(target_output, output):
+            target_str = embedded_to_string(target)
+            actual_str = embedded_to_string(actual)
+            print(target_str + ": " + actual_str)
+            if target_str == actual_str:
+                num_correct += 1
+        print("Accuracy: %d" % (num_correct / output.shape[0]))
