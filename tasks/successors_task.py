@@ -58,7 +58,7 @@ parser.add_argument('-visdom', action='store_true', help='plot memory content on
 args = parser.parse_args()
 print(args)
 
-viz = Visdom()
+viz = Visdom(port=6006)
 # assert viz.check_connection()
 
 if args.cuda != -1:
@@ -123,6 +123,10 @@ def generate_data(length):
 
 def cross_entropy(prediction, target):
     return (prediction - target) ** 2
+
+
+def q_and_a_to_string(question, answer):
+    return embedded_to_string(question)[:-random_length+1] + embedded_to_string(answer)[-random_length:]
 
 
 if __name__ == '__main__':
@@ -225,15 +229,15 @@ if __name__ == '__main__':
         llprint("\rIteration {ep}/{tot}".format(ep=epoch, tot=iterations))
         optimizer.zero_grad()
         # We use for training just (sequence_max_length / 10) examples
-        random_length = np.random.randint(2, (sequence_max_length) + 1)
-        input_data, target_output = generate_data(5)
+        random_length = np.random.randint(2, sequence_max_length + 1)
+        input_data, target_output = generate_data(random_length)
 
         if rnn.debug:
-            output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+            output, (chx, mhx, rv), all_mems, v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
         else:
-            output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+            output, (chx, mhx, rv), all_mems = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
 
-        output = output[:,-5:,:]
+        output = output[:,-random_length:,:]
         loss = cross_entropy(output, target_output).sum()
 
         loss.backward()
@@ -263,6 +267,59 @@ if __name__ == '__main__':
             print("Accuracy: %f" % (num_correct / output.shape[0]))
             last_100_losses = []
 
+        if summarize and rnn.debug:
+            loss = np.mean(last_save_losses)
+            last_save_losses = []
+
+            print(random_length)
+            if (epoch / summarize_freq) % 3 == 0:
+                viz.close(None)
+            viz.heatmap(
+                mhx['memory'][0],
+                opts=dict(
+                    xtickstep=10,
+                    ytickstep=2,
+                    title='Memory, t: ' + str(epoch) + ', num: ' + q_and_a_to_string(input_data[0], output[0]),
+                    ylabel='layer * time',
+                    xlabel='mem_slot * mem_size'
+                )
+            )
+
+            all_read_weights = torch.stack([x['read_weights'][0] for x in all_mems])
+            viz.heatmap(
+                all_read_weights.squeeze(),
+                opts=dict(
+                    xtickstep=10,
+                    ytickstep=2,
+                    title='Read Weights, t: ' + str(epoch) + ', num: ' + q_and_a_to_string(input_data[0], output[0]),
+                    ylabel='layer * time',
+                    xlabel='nr_read_heads * mem_slot'
+                )
+            )
+
+            all_write_weights = torch.stack([x['write_weights'][0] for x in all_mems])
+            viz.heatmap(
+                all_write_weights.squeeze(),
+                opts=dict(
+                    xtickstep=10,
+                    ytickstep=2,
+                    title='Write Weights, t: ' + str(epoch) + ', num: ' + q_and_a_to_string(input_data[0], output[0]),
+                    ylabel='layer * time',
+                    xlabel='mem_slot'
+                )
+            )
+
+            viz.heatmap(
+                mhx['usage_vector'],
+                opts=dict(
+                    xtickstep=10,
+                    ytickstep=2,
+                    title='Usage Vector, t: ' + str(epoch) + ', num: ' + q_and_a_to_string(input_data[0], output[0]),
+                    ylabel='layer * time',
+                    xlabel='mem_slot'
+                )
+            )
+
         if take_checkpoint:
             llprint("\nSaving Checkpoint ... "),
             check_ptr = os.path.join(ckpts_dir, 'step_{}.pth'.format(epoch))
@@ -277,15 +334,18 @@ if __name__ == '__main__':
     for i in range(int((iterations + 1) / 10)):
         llprint("\nIteration %d/%d" % (i, iterations))
         # We test now the learned generalization using sequence_max_length examples
-        random_length = np.random.randint(2, int(sequence_max_length) * 10 + 1)
-        input_data, target_output = generate_data(5)
+        random_length = sequence_max_length # np.random.randint(2, int(sequence_max_length) * 2 + 1)
+        input_data, target_output = generate_data(random_length)
 
         if rnn.debug:
-            output, (chx, mhx, rv), v = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+            output, (chx, mhx, rv), v, _ = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
         else:
-            output, (chx, mhx, rv) = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
+            output, (chx, mhx, rv), _ = rnn(input_data, (None, mhx, None), reset_experience=True, pass_through_memory=True)
 
-        output = output[:, -5:, :]
+        # detach memory from graph
+        mhx = { k : (v.detach() if isinstance(v, var) else v) for k, v in mhx.items() }
+
+        output = output[:, -random_length:, :]
         num_correct = 0
         for target, actual in zip(target_output, output):
             target_str = embedded_to_string(target)
@@ -293,4 +353,4 @@ if __name__ == '__main__':
             print(target_str + ": " + actual_str)
             if target_str == actual_str:
                 num_correct += 1
-        print("Accuracy: %d" % (num_correct / output.shape[0]))
+        print("Accuracy: %f" % (num_correct / output.shape[0]))

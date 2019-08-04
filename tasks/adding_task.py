@@ -239,6 +239,115 @@ if __name__ == '__main__':
       print("Predicted:  ", ' = ' + str(int(output // 1)) + " [" + str(output) + "]")
       last_100_losses = []
 
+    if summarize and rnn.debug:
+      loss = np.mean(last_save_losses)
+      last_save_losses = []
+
+      if args.memory_type == 'dnc' or args.memory_type == 'sdnc':
+        print(random_length)
+        print(input_data)
+        viz.heatmap(
+            mhx['memory'].squeeze(),
+            opts=dict(
+                xtickstep=10,
+                ytickstep=2,
+                title='Memory, t: ' + str(epoch) + ', loss: ' + str(loss),
+                ylabel='layer * time',
+                xlabel='mem_slot * mem_size'
+            )
+        )
+
+      # if args.memory_type == 'dnc':
+      #   viz.heatmap(
+      #       v['link_matrix'][-1].reshape(args.mem_slot, args.mem_slot),
+      #       opts=dict(
+      #           xtickstep=10,
+      #           ytickstep=2,
+      #           title='Link Matrix, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #           ylabel='mem_slot',
+      #           xlabel='mem_slot'
+      #       )
+      #   )
+      # elif args.memory_type == 'sdnc':
+      #   viz.heatmap(
+      #       v['link_matrix'][-1].reshape(args.mem_slot, -1),
+      #       opts=dict(
+      #           xtickstep=10,
+      #           ytickstep=2,
+      #           title='Link Matrix, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #           ylabel='mem_slot',
+      #           xlabel='mem_slot'
+      #       )
+      #   )
+      #
+      #   viz.heatmap(
+      #       v['rev_link_matrix'][-1].reshape(args.mem_slot, -1),
+      #       opts=dict(
+      #           xtickstep=10,
+      #           ytickstep=2,
+      #           title='Reverse Link Matrix, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #           ylabel='mem_slot',
+      #           xlabel='mem_slot'
+      #       )
+      #   )
+      #
+      # elif args.memory_type == 'sdnc' or args.memory_type == 'dnc':
+      #   viz.heatmap(
+      #       v['precedence'],
+      #       opts=dict(
+      #           xtickstep=10,
+      #           ytickstep=2,
+      #           title='Precedence, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #           ylabel='layer * time',
+      #           xlabel='mem_slot'
+      #       )
+      #   )
+      #
+      # if args.memory_type == 'sdnc':
+      #   viz.heatmap(
+      #       v['read_positions'],
+      #       opts=dict(
+      #           xtickstep=10,
+      #           ytickstep=2,
+      #           title='Read Positions, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #           ylabel='layer * time',
+      #           xlabel='mem_slot'
+      #       )
+      #   )
+      #
+      # viz.heatmap(
+      #     v['read_weights'],
+      #     opts=dict(
+      #         xtickstep=10,
+      #         ytickstep=2,
+      #         title='Read Weights, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #         ylabel='layer * time',
+      #         xlabel='nr_read_heads * mem_slot'
+      #     )
+      # )
+      #
+      # viz.heatmap(
+      #     v['write_weights'],
+      #     opts=dict(
+      #         xtickstep=10,
+      #         ytickstep=2,
+      #         title='Write Weights, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #         ylabel='layer * time',
+      #         xlabel='mem_slot'
+      #     )
+      # )
+      #
+      # viz.heatmap(
+      #     v['usage_vector'] if args.memory_type == 'dnc' else v['usage'],
+      #     opts=dict(
+      #         xtickstep=10,
+      #         ytickstep=2,
+      #         title='Usage Vector, t: ' + str(epoch) + ', loss: ' + str(loss),
+      #         ylabel='layer * time',
+      #         xlabel='mem_slot'
+      #     )
+      # )
+
     if take_checkpoint:
       llprint("\nSaving Checkpoint ... "),
       check_ptr = os.path.join(ckpts_dir, 'step_{}.pth'.format(epoch))
